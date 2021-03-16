@@ -2,9 +2,20 @@ from subprocess import Popen, PIPE, STDOUT, CalledProcessError
 from jack import Client
 from Xlib import display
 from Xlib.ext import xinerama
+import netifaces
 
-from ..XmlReaderWriter import XmlWriter
+from ..XmlReaderWriter import XmlReader, XmlWriter
 from ..log import logger
+from ..cuems_nodeconf.CuemsNode import CuemsNode, CuemsNodeDict
+
+from socket import socket, AF_INET, SOCK_STREAM
+import pickle
+import struct
+
+
+class Outputs(dict):
+    pass
+
 
 class HWDiscovery():
     '''
@@ -12,48 +23,57 @@ class HWDiscovery():
     and write the results in an XML
     '''
     def __init__(self):
-        self.Iammaster = self.check_node_role()
+        self.xsd_path = '/etc/cuems/network_map.xsd'
+        self.map_path = '/etc/cuems/network_map.xml'
+
+        self.network_map = CuemsNodeDict()
+        self.outputs_object = Outputs()
+        self.my_node = None
+        self.HEADER_LEN = 4
+
+
+        try:
+            self.my_node = self.check_node_role()
+        except Exception as e:
+            raise e
 
         self.local_hwd()
 
-        if self.Iammaster:
+        if self.my_node.node_type == CuemsNode.NodeType.master:
             self.network_hwd()
-        else:
+        elif self.my_node.node_type == CuemsNode.NodeType.slave:
             self.serve_local_settings()
 
     def local_hwd(self):
         '''Perform local node hardware detections and records'''
 
-        class Outputs(dict):
-            pass
-
-        outputs_object = Outputs()
-        outputs_object['audio'] = {}
-        outputs_object['video'] = {'outputs':{'output':[]}, 'default_output':''}
-        outputs_object['dmx'] = {}
+        self.outputs_object = Outputs()
+        self.outputs_object['audio'] = {}
+        self.outputs_object['video'] = {'outputs':{'output':[]}, 'default_output':''}
+        self.outputs_object['dmx'] = {}
 
         # Audio outputs
         jc = Client('CuemsHWDiscovery')
         ports = jc.get_ports(is_audio=True, is_physical=True, is_input=True)
         if ports:
-            outputs_object['audio']['outputs'] = {'output':[]}
-            outputs_object['audio']['default_output'] = ''
+            self.outputs_object['audio']['outputs'] = {'output':[]}
+            self.outputs_object['audio']['default_output'] = ''
 
             for port in ports:
-                outputs_object['audio']['outputs']['output'].append({'name':port.name, 'mappings':{'mapped_to':[port.name, ]}})
+                self.outputs_object['audio']['outputs']['output'].append({'name':port.name, 'mappings':{'mapped_to':[port.name, ]}})
 
-            outputs_object['audio']['default_output'] = outputs_object['audio']['outputs']['output'][0]['name']
+            self.outputs_object['audio']['default_output'] = self.outputs_object['audio']['outputs']['output'][0]['name']
 
         # Audio inputs
         ports = jc.get_ports(is_audio=True, is_physical=True, is_output=True)
         if ports:
-            outputs_object['audio']['inputs'] = {'input':[]}
-            outputs_object['audio']['default_input'] = ''
+            self.outputs_object['audio']['inputs'] = {'input':[]}
+            self.outputs_object['audio']['default_input'] = ''
 
             for port in ports:
-                outputs_object['audio']['inputs']['input'].append({'name':port.name, 'mappings':{'mapped_to':[port.name, ]}})
+                self.outputs_object['audio']['inputs']['input'].append({'name':port.name, 'mappings':{'mapped_to':[port.name, ]}})
 
-            outputs_object['audio']['default_input'] = outputs_object['audio']['inputs']['input'][0]['name']
+            self.outputs_object['audio']['default_input'] = self.outputs_object['audio']['inputs']['input'][0]['name']
 
         jc.close()
 
@@ -67,22 +87,22 @@ class HWDiscovery():
             qs = xinerama.query_screens(window)
             if qs._data['number'] > 0:
                 for index, screen in enumerate(qs._data['screens']):
-                    outputs_object['video']['outputs']['output'].append({'name':f'{index}', 'mappings':{'mapped_to':[f'{index}', ]}})
+                    self.outputs_object['video']['outputs']['output'].append({'name':f'{index}', 'mappings':{'mapped_to':[f'{index}', ]}})
 
         except Exception as e:
             logger.exception(e)
-            outputs_object['video']['outputs'] = {'output':[]}
+            self.outputs_object['video']['outputs'] = {'output':[]}
 
-        if outputs_object['video']['outputs']['output']:
-            outputs_object['video']['default_output'] = outputs_object['video']['outputs']['output'][0]['name']
+        if self.outputs_object['video']['outputs']['output']:
+            self.outputs_object['video']['default_output'] = self.outputs_object['video']['outputs']['output'][0]['name']
         else:
-            outputs_object['video']['default_output'] = ''
+            self.outputs_object['video']['default_output'] = ''
 
         # XML Writer
         writer = XmlWriter(schema = '/etc/cuems/project_mappings.xsd', xmlfile = '/etc/cuems/default_mappings.xml', xml_root_tag='CuemsProjectMappings')
 
         try:
-            writer.write_from_object(outputs_object)
+            writer.write_from_object(self.outputs_object)
         except Exception as e:
             logger.exception(e)
 
@@ -92,18 +112,86 @@ class HWDiscovery():
         '''Perform network hardware discovery, just in case I'm a master node'''
 
         ### REVIEW NETWORK MAP
+        ### AND RETREIVE EACH NODE HW SETTINGS
+        print('Master node retreiving hw_info from each slave node:')
+        for node in self.network_map.slaves:
+            print(f'Node: {node}')
+            try:
+                clientsocket = socket(AF_INET, SOCK_STREAM)
 
-        ### RETREIVE EACH NODE HW SETTINGS
+                clientsocket.connect((node.ip, node.port))
+            except Exception as e:
+                raise e
+
+            # First the header with the size coming next
+            buf = ''
+            while len(buf) < 4:
+                buf += clientsocket.recv(8)
+            size = struct.unpack('!i', buf[:4])[0]
+
+            chunks = []
+            bytes_recd = 0
+            # first we receive a header with the length of the object that is coming
+            while bytes_recd < self.HEADER_LEN:
+                chunk = self.sock.recv(min(self.HEADER_LEN - bytes_recd, 2048))
+                if chunk == b'':
+                    raise RuntimeError("socket connection broken")
+                chunks.append(chunk)
+                bytes_recd = bytes_recd + len(chunk)
+            message_size = int(b''.join(chunks))
 
         ### WRITE THEM ALL
-
-        pass
 
     def serve_local_settings(self):
         '''Start an ip server (we'll see which protocol to use) to serve our own local 
         hardware settings with the master'''
-        pass
+        try:
+            serversocket = socket(AF_INET, SOCK_STREAM)
+            serversocket.bind((self.my_node.ip, self.my_node.port))
+            serversocket.listen(5)
+
+            (clientsocket, address) = serversocket.accept()
+        except Exception as e:
+            raise e
+
+        pickle_dump = pickle.dumps(self.outputs_object)
+
+        # first the header with the length of th object
+        size = len(pickle_dump)
+        packet_size = pack('!i', size)
+        tcpsocket.send(packed_size)
+
+        # then the whole pickle
+        totalsent = 0
+        while totalsent < size:
+            sent = clientsocket.send(pickle_dump[totalsent:])
+            if sent == 0:
+                raise RuntimeError("socket connection broken")
+            totalsent = totalsent + sent
+        
+        print('Configuración enviada al master!!!')
 
     def check_node_role(self):
         '''Checks the role (master or slave) of the local node'''
-        pass
+        reader = XmlReader(schema = self.xsd_path, xmlfile = self.map_path)
+        nodes = reader.read_to_objects()
+        ip = self.get_ip()
+        my_node = None
+        for node in nodes:
+            self.network_map[node.uuid] = node
+
+            if node.node_type == 'NodeType.master':
+                self.network_map[node.uuid].node_type = CuemsNode.NodeType.master
+            elif node.node_type == 'NodeType.slave':
+                self.network_map[node.uuid].node_type = CuemsNode.NodeType.slave
+            else:
+                raise Exception('Node type not recognized in network map.')
+
+            if node.ip == ip:
+                my_node = node
+        
+        return my_node
+    
+    def get_ip(self):
+        iface = netifaces.gateways()['default'][netifaces.AF_INET][1]
+        return netifaces.ifaddresses(iface)[netifaces.AF_INET][0]['addr']
