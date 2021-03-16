@@ -115,36 +115,39 @@ class HWDiscovery():
         ### AND RETREIVE EACH NODE HW SETTINGS
         print('Master node retreiving hw_info from each slave node:')
         for node in self.network_map.slaves:
-            print(f'Node: {node}')
             try:
-                clientsocket = socket(AF_INET, SOCK_STREAM)
+                print(f'Node: {node}')
+                try:
+                    clientsocket = socket(AF_INET, SOCK_STREAM)
 
-                clientsocket.connect((node.ip, node.port))
+                    clientsocket.connect((node.ip, node.port))
+                except Exception as e:
+                    raise e
+
+                # First the header with the size coming next
+                buf = ''
+                while len(buf) < 4:
+                    buf += clientsocket.recv(8)
+                size = struct.unpack('!i', buf[:4])[0]
+
+                print(f'Received size header from socket : {size}')
+
+                chunks = []
+                bytes_recd = 0
+                # first we receive a header with the length of the object that is coming
+                while bytes_recd < size:
+                    chunk = clientsocket.recv(min(size - bytes_recd, 2048))
+                    if chunk == b'':
+                        raise RuntimeError("socket connection broken")
+                    chunks.append(chunk)
+                    bytes_recd = bytes_recd + len(chunk)
+
+                data_received = chunks.join()
+
+                object_received = pickle.loads(data_received[:size])
+                print(f'Received size header from socket : {object_received}')
             except Exception as e:
                 raise e
-
-            # First the header with the size coming next
-            buf = ''
-            while len(buf) < 4:
-                buf += clientsocket.recv(8)
-            size = struct.unpack('!i', buf[:4])[0]
-
-            print(f'Received size header from socket : {size}')
-
-            chunks = []
-            bytes_recd = 0
-            # first we receive a header with the length of the object that is coming
-            while bytes_recd < size:
-                chunk = clientsocket.recv(min(size - bytes_recd, 2048))
-                if chunk == b'':
-                    raise RuntimeError("socket connection broken")
-                chunks.append(chunk)
-                bytes_recd = bytes_recd + len(chunk)
-
-            data_received = chunks.join()
-
-            object_received = pickle.loads(data_received[:size])
-            print(f'Received size header from socket : {object_received}')
 
         ### WRITE THEM ALL
 
@@ -164,7 +167,7 @@ class HWDiscovery():
 
         # first the header with the length of th object
         size = len(pickle_dump)
-        packet_size = struct.pack('!i', size)
+        packed_size = struct.pack('!i', size)
         clientsocket.send(packed_size)
 
         # then the whole pickle
