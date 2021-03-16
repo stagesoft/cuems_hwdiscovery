@@ -129,16 +129,22 @@ class HWDiscovery():
                 buf += clientsocket.recv(8)
             size = struct.unpack('!i', buf[:4])[0]
 
+            print(f'Received size header from socket : {size}')
+
             chunks = []
             bytes_recd = 0
             # first we receive a header with the length of the object that is coming
-            while bytes_recd < self.HEADER_LEN:
-                chunk = self.sock.recv(min(self.HEADER_LEN - bytes_recd, 2048))
+            while bytes_recd < size:
+                chunk = clientsocket.recv(min(size - bytes_recd, 2048))
                 if chunk == b'':
                     raise RuntimeError("socket connection broken")
                 chunks.append(chunk)
                 bytes_recd = bytes_recd + len(chunk)
-            message_size = int(b''.join(chunks))
+
+            data_received = chunks.join()
+
+            object_received = pickle.loads(data_received[:size])
+            print(f'Received size header from socket : {object_received}')
 
         ### WRITE THEM ALL
 
@@ -158,8 +164,8 @@ class HWDiscovery():
 
         # first the header with the length of th object
         size = len(pickle_dump)
-        packet_size = pack('!i', size)
-        tcpsocket.send(packed_size)
+        packet_size = struct.pack('!i', size)
+        clientsocket.send(packed_size)
 
         # then the whole pickle
         totalsent = 0
