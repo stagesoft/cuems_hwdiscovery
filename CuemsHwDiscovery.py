@@ -11,17 +11,36 @@ from ..cuems_nodeconf.CuemsNode import CuemsNode, CuemsNodeDict
 from socket import socket, AF_INET, SOCK_STREAM
 import pickle
 import struct
+from time import sleep
 
 
 class Outputs(dict):
-    pass
+    def __init__(self):
+        super(Outputs, self).__init__()
 
+    @property
+    def number_of_nodes(self):
+        return super().__getitem__('number_of_nodes')
+
+    @number_of_nodes.setter
+    def number_of_nodes(self, number_of_nodes):
+        super().__setitem__('number_of_nodes', number_of_nodes)
+
+    @property
+    def nodes(self):
+        return super().__getitem__('nodes')
+
+    @nodes.setter
+    def nodes(self, nodes):
+        super().__setitem__('nodes', nodes)
 
 class HWDiscovery():
     '''
     Searches for the audio and video outputs through Jack and Xinerama
     and write the results in an XML
     '''
+    MAX_SLAVE_CONNECTION_RETRIES = 3
+
     def __init__(self):
         self.xsd_path = '/etc/cuems/network_map.xsd'
         self.map_path = '/etc/cuems/network_map.xml'
@@ -41,43 +60,58 @@ class HWDiscovery():
 
         if self.my_node.node_type == CuemsNode.NodeType.master:
             self.network_hwd()
+            # Update number of nodes after discovery the network
+            self.outputs_object.number_of_nodes = len(self.outputs_object.nodes)
+
+            logger.debug(f"I'm the MASTER, this is all the hwd discovered on the net:\n {self.outputs_object}")
         elif self.my_node.node_type == CuemsNode.NodeType.slave:
+            logger.debug(f"I'm a SLAVE, this is my local hwd discovered:\n {self.outputs_object}")
+            logger.debug(self.outputs_object)
             self.serve_local_settings()
+
+        self.write_mappings_file()
 
     def local_hwd(self):
         '''Perform local node hardware detections and records'''
 
         self.outputs_object = Outputs()
-        self.outputs_object['audio'] = {}
-        self.outputs_object['video'] = {'outputs':{'output':[]}, 'default_output':''}
-        self.outputs_object['dmx'] = {}
+        self.outputs_object.number_of_nodes = 1
+        self.outputs_object.nodes = []
+
+        # Audio
+        temp_node_dict = {'node' : {'uuid':self.my_node.uuid}}
+        temp_dict = {}
 
         # Audio outputs
         jc = Client('CuemsHWDiscovery')
         ports = jc.get_ports(is_audio=True, is_physical=True, is_input=True)
         if ports:
-            self.outputs_object['audio']['outputs'] = {'output':[]}
-            self.outputs_object['audio']['default_output'] = ''
+            temp_dict['outputs'] = {'output':[]}
+            temp_dict['default_output'] = ''
 
             for port in ports:
-                self.outputs_object['audio']['outputs']['output'].append({'name':port.name, 'mappings':{'mapped_to':[port.name, ]}})
+                temp_dict['outputs']['output'].append({'name':f'{port.name}', 'mappings':{'mapped_to':[f'{port.name}', ]}})
 
-            self.outputs_object['audio']['default_output'] = self.outputs_object['audio']['outputs']['output'][0]['name']
+            temp_dict['default_output'] = temp_dict['outputs']['output'][0]['name']
 
         # Audio inputs
         ports = jc.get_ports(is_audio=True, is_physical=True, is_output=True)
         if ports:
-            self.outputs_object['audio']['inputs'] = {'input':[]}
-            self.outputs_object['audio']['default_input'] = ''
+            temp_dict['inputs'] = {'input':[]}
+            temp_dict['default_input'] = ''
 
             for port in ports:
-                self.outputs_object['audio']['inputs']['input'].append({'name':port.name, 'mappings':{'mapped_to':[port.name, ]}})
+                temp_dict['inputs']['input'].append({'name':f'{port.name}', 'mappings':{'mapped_to':[f'{port.name}', ]}})
 
-            self.outputs_object['audio']['default_input'] = self.outputs_object['audio']['inputs']['input'][0]['name']
+            temp_dict['default_input'] = temp_dict['inputs']['input'][0]['name']
 
         jc.close()
 
+        temp_node_dict['node']['audio'] = temp_dict
+
         # Video
+        temp_dict = {'outputs':{'output':[]}, 'default_output':''}
+
         try:
             # Xlib video outputs retreival through xinerama extension
             disp = display.Display()
@@ -87,69 +121,89 @@ class HWDiscovery():
             qs = xinerama.query_screens(window)
             if qs._data['number'] > 0:
                 for index, screen in enumerate(qs._data['screens']):
-                    self.outputs_object['video']['outputs']['output'].append({'name':f'{index}', 'mappings':{'mapped_to':[f'{index}', ]}})
+                    temp_dict['outputs']['output'].append({'name':f'{index}', 'mappings':{'mapped_to':[f'{index}', ]}})
 
         except Exception as e:
             logger.exception(e)
-            self.outputs_object['video']['outputs'] = {'output':[]}
+            temp_dict['outputs'] = {'output':[]}
 
-        if self.outputs_object['video']['outputs']['output']:
-            self.outputs_object['video']['default_output'] = self.outputs_object['video']['outputs']['output'][0]['name']
+        if temp_dict['outputs']['output']:
+            temp_dict['default_output'] = temp_dict['outputs']['output'][0]['name']
         else:
-            self.outputs_object['video']['default_output'] = ''
+            temp_dict['default_output'] = ''
 
-        # XML Writer
-        writer = XmlWriter(schema = '/etc/cuems/project_mappings.xsd', xmlfile = '/etc/cuems/default_mappings.xml', xml_root_tag='CuemsProjectMappings')
+        temp_node_dict['node']['video'] = temp_dict
 
-        try:
-            writer.write_from_object(self.outputs_object)
-        except Exception as e:
-            logger.exception(e)
+        # DMX
+        temp_node_dict['node']['dmx'] = {}
 
-        logger.info(f'Hardware discovery completed. Default mappings writen to {writer.xmlfile}')
+        # Append this node to the node list
+        self.outputs_object['nodes'].append(temp_node_dict)
 
     def network_hwd(self):
         '''Perform network hardware discovery, just in case I'm a master node'''
 
         ### REVIEW NETWORK MAP
         ### AND RETREIVE EACH NODE HW SETTINGS
-        print('Master node retreiving hw_info from each slave node:')
+        logger.info('Master node retreiving hw_info from each slave node:')
         for node in self.network_map.slaves:
             try:
-                print(f'Node: {node}')
-                try:
-                    clientsocket = socket(AF_INET, SOCK_STREAM)
+                retries = 0
+                while retries < self.MAX_SLAVE_CONNECTION_RETRIES:
+                    try:
+                        clientsocket = socket(AF_INET, SOCK_STREAM)
 
-                    clientsocket.connect((node.ip, node.port))
-                except Exception as e:
-                    raise e
+                        clientsocket.connect((node.ip, node.port))
+                    except ConnectionRefusedError as e:
+                        retries += 1
+                        sleep(1)
+                    except Exception as e:
+                        logger.exception(e)
+                        raise e
+                    else:
+                        break
+
+                if retries == 3:
+                    logger.warning(f'WARNING: Connection with node {node.uuid} refused')
+                    break
 
                 # First the header with the size coming next
                 buf = ''
                 while len(buf) < 4:
-                    buf += clientsocket.recv(8)
+                    buf = clientsocket.recv(4)
                 size = struct.unpack('!i', buf[:4])[0]
-
-                print(f'Received size header from socket : {size}')
+                logger.info(f'Slave {node.uuid} sent header: {size}')
 
                 chunks = []
                 bytes_recd = 0
                 # first we receive a header with the length of the object that is coming
-                while bytes_recd < size:
-                    chunk = clientsocket.recv(min(size - bytes_recd, 2048))
-                    if chunk == b'':
-                        raise RuntimeError("socket connection broken")
-                    chunks.append(chunk)
-                    bytes_recd = bytes_recd + len(chunk)
+                try:
+                    while bytes_recd < size:
+                        try:
+                            chunk = clientsocket.recv(min(size - bytes_recd, 2048))
+                        except Exception as e:
+                            logger.exception(e)
+                            raise e
 
-                data_received = chunks.join()
+                        if chunk == b'':
+                            raise RuntimeError("Socket connection broken")
+                        
+                        chunks.append(chunk)
+                        bytes_recd = bytes_recd + len(chunk)
+                except Exception as e:
+                    logger.exception(e)
+                    raise e
+
+                data_received = b''.join(chunks)
 
                 object_received = pickle.loads(data_received[:size])
-                print(f'Received size header from socket : {object_received}')
+                logger.info(f'Slave {node.uuid} sent mappings object: {object_received}')
             except Exception as e:
+                logger.exception(e)
                 raise e
 
-        ### WRITE THEM ALL
+            ### JOIN RECEIVED MAP WITH LOCAL
+            self.outputs_object['nodes'].extend(object_received['nodes'])
 
     def serve_local_settings(self):
         '''Start an ip server (we'll see which protocol to use) to serve our own local 
@@ -161,24 +215,41 @@ class HWDiscovery():
 
             (clientsocket, address) = serversocket.accept()
         except Exception as e:
+            logger.exception(e)
             raise e
 
         pickle_dump = pickle.dumps(self.outputs_object)
 
-        # first the header with the length of th object
+        # First the header with the length of the object
         size = len(pickle_dump)
         packed_size = struct.pack('!i', size)
         clientsocket.send(packed_size)
 
-        # then the whole pickle
+        # Then the whole pickle
         totalsent = 0
         while totalsent < size:
             sent = clientsocket.send(pickle_dump[totalsent:])
             if sent == 0:
                 raise RuntimeError("socket connection broken")
             totalsent = totalsent + sent
-        
-        print('Configuración enviada al master!!!')
+
+        logger.info(f'Sent {totalsent} bytes')
+        logger.info('Local mappings configuration sent to master node!')
+
+        serversocket.close()
+
+    def write_mappings_file(self):
+        # XML Writer
+        writer = XmlWriter(schema = '/etc/cuems/project_mappings.xsd', xmlfile = '/etc/cuems/default_mappings.xml', xml_root_tag='CuemsProjectMappings')
+
+        try:
+            writer.write_from_object(self.outputs_object)
+        except Exception as e:
+            logger.exception(e)
+            print('No se ha podido guardar el fichero de mappings')
+            exit(-1)
+
+        logger.info(f'Hardware discovery completed. Default mappings writen to {writer.xmlfile}')
 
     def check_node_role(self):
         '''Checks the role (master or slave) of the local node'''
