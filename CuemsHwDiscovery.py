@@ -34,12 +34,12 @@ class Outputs(dict):
     def nodes(self, nodes):
         super().__setitem__('nodes', nodes)
 
-class HWDiscovery():
+class CuemsHWDiscovery():
     '''
     Searches for the audio and video outputs through Jack and Xinerama
     and write the results in an XML
     '''
-    MAX_SLAVE_CONNECTION_RETRIES = 3
+    MAX_SLAVE_CONNECTION_RETRIES = 5
 
     def __init__(self):
         self.xsd_path = '/etc/cuems/network_map.xsd'
