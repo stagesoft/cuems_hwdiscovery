@@ -76,10 +76,16 @@ class CuemsHWDiscovery():
 
         self.outputs_object = Outputs()
         self.outputs_object.number_of_nodes = 1
+        self.outputs_object['default_audio_input'] = ""
+        self.outputs_object['default_audio_output'] = ""
+        self.outputs_object['default_video_input'] = ""
+        self.outputs_object['default_video_output'] = ""
+        self.outputs_object['default_dmx_input'] = ""
+        self.outputs_object['default_dmx_output'] = ""
         self.outputs_object.nodes = []
 
         # Audio
-        temp_node_dict = {'node' : {'uuid':self.my_node.uuid}}
+        temp_node_dict = {'node' : {'uuid': '', 'mac' : self.my_node.mac}}
         temp_dict = {}
 
         # Audio outputs
@@ -87,30 +93,28 @@ class CuemsHWDiscovery():
         ports = jc.get_ports(is_audio=True, is_physical=True, is_input=True)
         if ports:
             temp_dict['outputs'] = {'output':[]}
-            temp_dict['default_output'] = ''
 
             for port in ports:
                 temp_dict['outputs']['output'].append({'name':f'{port.name}', 'mappings':{'mapped_to':[f'{port.name}', ]}})
 
-            temp_dict['default_output'] = temp_dict['outputs']['output'][0]['name']
+            self.outputs_object['default_audio_output'] = f"{self.my_node.mac} {temp_dict['outputs']['output'][0]['name']}"
 
         # Audio inputs
         ports = jc.get_ports(is_audio=True, is_physical=True, is_output=True)
         if ports:
             temp_dict['inputs'] = {'input':[]}
-            temp_dict['default_input'] = ''
 
             for port in ports:
                 temp_dict['inputs']['input'].append({'name':f'{port.name}', 'mappings':{'mapped_to':[f'{port.name}', ]}})
 
-            temp_dict['default_input'] = temp_dict['inputs']['input'][0]['name']
+            self.outputs_object['default_audio_input'] = f"{self.my_node.mac} {temp_dict['inputs']['input'][0]['name']}"
 
         jc.close()
 
         temp_node_dict['node']['audio'] = temp_dict
 
         # Video
-        temp_dict = {'outputs':{'output':[]}, 'default_output':''}
+        temp_dict = {'outputs':{'output':[]}}
 
         try:
             # Xlib video outputs retreival through xinerama extension
@@ -128,9 +132,7 @@ class CuemsHWDiscovery():
             temp_dict['outputs'] = {'output':[]}
 
         if temp_dict['outputs']['output']:
-            temp_dict['default_output'] = temp_dict['outputs']['output'][0]['name']
-        else:
-            temp_dict['default_output'] = ''
+            self.outputs_object['default_video_output'] = f"{self.my_node.mac} {temp_dict['outputs']['output'][0]['name']}"
 
         temp_node_dict['node']['video'] = temp_dict
 
@@ -164,7 +166,7 @@ class CuemsHWDiscovery():
                         break
 
                 if retries == 3:
-                    logger.warning(f'WARNING: Connection with node {node.uuid} refused')
+                    logger.warning(f'WARNING: Connection with node {node.mac} refused')
                     break
 
                 # First the header with the size coming next
@@ -172,7 +174,7 @@ class CuemsHWDiscovery():
                 while len(buf) < 4:
                     buf = clientsocket.recv(4)
                 size = struct.unpack('!i', buf[:4])[0]
-                logger.info(f'Slave {node.uuid} sent header: {size}')
+                logger.info(f'Slave {node.mac} sent header: {size}')
 
                 chunks = []
                 bytes_recd = 0
@@ -197,7 +199,7 @@ class CuemsHWDiscovery():
                 data_received = b''.join(chunks)
 
                 object_received = pickle.loads(data_received[:size])
-                logger.info(f'Slave {node.uuid} sent mappings object: {object_received}')
+                logger.info(f'Slave {node.mac} sent mappings object: {object_received}')
             except Exception as e:
                 logger.exception(e)
                 raise e
@@ -258,12 +260,12 @@ class CuemsHWDiscovery():
         ip = self.get_ip()
         my_node = None
         for node in nodes:
-            self.network_map[node.uuid] = node
+            self.network_map[node.mac] = node
 
             if node.node_type == 'NodeType.master':
-                self.network_map[node.uuid].node_type = CuemsNode.NodeType.master
+                self.network_map[node.mac].node_type = CuemsNode.NodeType.master
             elif node.node_type == 'NodeType.slave':
-                self.network_map[node.uuid].node_type = CuemsNode.NodeType.slave
+                self.network_map[node.mac].node_type = CuemsNode.NodeType.slave
             else:
                 raise Exception('Node type not recognized in network map.')
 
