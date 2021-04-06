@@ -85,7 +85,7 @@ class CuemsHWDiscovery():
         self.outputs_object.nodes = []
 
         # Audio
-        temp_node_dict = {'node' : {'uuid': '', 'mac' : self.my_node.mac}}
+        temp_node_dict = {'node' : {'uuid': self.my_node.uuid, 'mac' : self.my_node.mac}}
         temp_dict = {}
 
         # Audio outputs
