@@ -42,9 +42,6 @@ class CuemsHWDiscovery():
     MAX_SLAVE_CONNECTION_RETRIES = 5
 
     def __init__(self):
-        self.xsd_path = '/etc/cuems/network_map.xsd'
-        self.map_path = '/etc/cuems/network_map.xml'
-
         self.network_map = CuemsNodeDict()
         self.outputs_object = Outputs()
         self.my_node = None
@@ -238,7 +235,11 @@ class CuemsHWDiscovery():
         logger.info(f'Sent {totalsent} bytes')
         logger.info('Local mappings configuration sent to master node!')
 
-        serversocket.close()
+        try:
+            socket.shutdown(serversocket)
+            serversocket.close()
+        except Exception as e:
+            logger.exception(e)
 
     def write_mappings_file(self):
         # XML Writer
@@ -254,8 +255,11 @@ class CuemsHWDiscovery():
         logger.info(f'Hardware discovery completed. Default mappings writen to {writer.xmlfile}')
 
     def check_node_role(self):
+        xsd_path = '/etc/cuems/network_map.xsd'
+        map_path = '/etc/cuems/network_map.xml'
+
         '''Checks the role (master or slave) of the local node'''
-        reader = XmlReader(schema = self.xsd_path, xmlfile = self.map_path)
+        reader = XmlReader(schema = xsd_path, xmlfile = map_path)
         nodes = reader.read_to_objects()
         ip = self.get_ip()
         my_node = None
