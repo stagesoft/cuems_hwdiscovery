@@ -12,6 +12,8 @@ from socket import socket, AF_INET, SOCK_STREAM
 import pickle
 import struct
 from time import sleep
+from datetime import datetime
+from os import path, system
 
 
 class Outputs(dict):
@@ -242,8 +244,17 @@ class CuemsHWDiscovery():
             logger.exception(e)
 
     def write_mappings_file(self):
+        xmlfile = '/etc/cuems/default_mappings.xml'
+
+        # Back up previous mappings file
+        if path.exists(xmlfile):
+            try:
+                system(f'cp {xmlfile} {xmlfile}_bak_{datetime.now().strftime("%Y%m%d_%H%M%S")}.xml')
+            except Exception as e:
+                logger.exception(f'Raised exception while creating default_mappings.xml back up copy: {e}')
+
         # XML Writer
-        writer = XmlWriter(schema = '/etc/cuems/project_mappings.xsd', xmlfile = '/etc/cuems/default_mappings.xml', xml_root_tag='CuemsProjectMappings')
+        writer = XmlWriter(schema = '/etc/cuems/project_mappings.xsd', xmlfile = xmlfile, xml_root_tag='CuemsProjectMappings')
 
         try:
             writer.write_from_object(self.outputs_object)
