@@ -58,7 +58,11 @@ class CuemsHWDiscovery():
         self.local_hwd()
 
         if self.my_node.node_type == CuemsNode.NodeType.master:
-            self.network_hwd()
+            try:
+                self.network_hwd()
+            except Exception as e:
+                logger.exception(f'Exception during network slaves hw discovery: {e}')
+                
             # Update number of nodes after discovery the network
             self.outputs_object.number_of_nodes = len(self.outputs_object.nodes)
 
@@ -96,7 +100,7 @@ class CuemsHWDiscovery():
             for port in ports:
                 temp_dict['outputs']['output'].append({'name':f'{port.name}', 'mappings':{'mapped_to':[f'{port.name}', ]}})
 
-            self.outputs_object['default_audio_output'] = f"{self.my_node.mac} {temp_dict['outputs']['output'][0]['name']}"
+            self.outputs_object['default_audio_output'] = f"{self.my_node.uuid}_{temp_dict['outputs']['output'][0]['name']}"
 
         # Audio inputs
         ports = jc.get_ports(is_audio=True, is_physical=True, is_output=True)
@@ -106,7 +110,7 @@ class CuemsHWDiscovery():
             for port in ports:
                 temp_dict['inputs']['input'].append({'name':f'{port.name}', 'mappings':{'mapped_to':[f'{port.name}', ]}})
 
-            self.outputs_object['default_audio_input'] = f"{self.my_node.mac} {temp_dict['inputs']['input'][0]['name']}"
+            self.outputs_object['default_audio_input'] = f"{self.my_node.uuid}_{temp_dict['inputs']['input'][0]['name']}"
 
         jc.close()
 
@@ -131,7 +135,7 @@ class CuemsHWDiscovery():
             temp_dict['outputs'] = {'output':[]}
 
         if temp_dict['outputs']['output']:
-            self.outputs_object['default_video_output'] = f"{self.my_node.mac} {temp_dict['outputs']['output'][0]['name']}"
+            self.outputs_object['default_video_output'] = f"{self.my_node.uuid}_{temp_dict['outputs']['output'][0]['name']}"
 
         temp_node_dict['node']['video'] = temp_dict
 
@@ -201,7 +205,6 @@ class CuemsHWDiscovery():
                 logger.info(f'Slave {node.mac} sent mappings object: {object_received}')
             except Exception as e:
                 logger.exception(e)
-                raise e
 
             ### JOIN RECEIVED MAP WITH LOCAL
             self.outputs_object['nodes'].extend(object_received['nodes'])
