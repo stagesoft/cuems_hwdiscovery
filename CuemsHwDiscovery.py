@@ -241,7 +241,7 @@ class CuemsHWDiscovery():
         logger.info('Local mappings configuration sent to master node!')
 
         try:
-            socket.shutdown(serversocket)
+            # socket.shutdown(serversocket)
             serversocket.close()
         except Exception as e:
             logger.exception(e)
