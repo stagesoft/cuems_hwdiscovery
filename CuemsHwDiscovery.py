@@ -293,5 +293,5 @@ class CuemsHWDiscovery():
         return my_node
     
     def get_ip(self):
-        iface = netifaces.gateways()['default'][netifaces.AF_INET][1]
-        return netifaces.ifaddresses(iface)[netifaces.AF_INET][0]['addr']
+        return netifaces.ifaddresses('ethernet0:avahi')[netifaces.AF_INET][0]['addr']        
+    
