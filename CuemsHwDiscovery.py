@@ -231,6 +231,7 @@ class CuemsHWDiscovery():
 
         # Then the whole pickle
         totalsent = 0
+        logger.info("Oh, Master, I'm here waiting for you... to connect...")
         while totalsent < size:
             sent = clientsocket.send(pickle_dump[totalsent:])
             if sent == 0:
