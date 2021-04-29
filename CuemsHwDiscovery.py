@@ -217,6 +217,8 @@ class CuemsHWDiscovery():
             serversocket.bind((self.my_node.ip, self.my_node.port))
             serversocket.listen(5)
 
+            logger.info("Oh, Master, I'm here waiting for you... to connect...")
+
             (clientsocket, address) = serversocket.accept()
         except Exception as e:
             logger.exception(e)
