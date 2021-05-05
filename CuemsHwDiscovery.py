@@ -152,6 +152,7 @@ class CuemsHWDiscovery():
         ### AND RETREIVE EACH NODE HW SETTINGS
         logger.info('Master node retreiving hw_info from each slave node:')
         for node in self.network_map.slaves:
+            object_received = None
             try:
                 retries = 0
                 while retries < self.MAX_SLAVE_CONNECTION_RETRIES:
@@ -168,7 +169,7 @@ class CuemsHWDiscovery():
                     else:
                         break
 
-                if retries == 3:
+                if retries == self.MAX_SLAVE_CONNECTION_RETRIES:
                     logger.warning(f'WARNING: Connection with node {node.mac} refused')
                     break
 
@@ -207,7 +208,8 @@ class CuemsHWDiscovery():
                 logger.exception(e)
 
             ### JOIN RECEIVED MAP WITH LOCAL
-            self.outputs_object['nodes'].extend(object_received['nodes'])
+            if object_received:
+                self.outputs_object['nodes'].extend(object_received['nodes'])
 
     def serve_local_settings(self):
         '''Start an ip server (we'll see which protocol to use) to serve our own local 
