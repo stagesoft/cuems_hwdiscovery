@@ -18,7 +18,11 @@ from os import path, system
 
 class Outputs(dict):
     def __init__(self):
-        super(Outputs, self).__init__()
+        self.number_of_nodes = 1
+
+        super(Outputs, self).__init__({'default_audio_input' : "", 'default_audio_output' : "", 'default_video_input' : "", 'default_video_output' : "", 'default_dmx_input' : "", 'default_dmx_output' : ""})
+
+        self.nodes = []
 
     @property
     def number_of_nodes(self):
@@ -49,6 +53,7 @@ class CuemsHWDiscovery():
         self.my_node = None
         self.HEADER_LEN = 4
 
+        self.outputs_object = Outputs()
 
         try:
             self.my_node = self.check_node_role()
@@ -76,16 +81,6 @@ class CuemsHWDiscovery():
 
     def local_hwd(self):
         '''Perform local node hardware detections and records'''
-
-        self.outputs_object = Outputs()
-        self.outputs_object.number_of_nodes = 1
-        self.outputs_object['default_audio_input'] = ""
-        self.outputs_object['default_audio_output'] = ""
-        self.outputs_object['default_video_input'] = ""
-        self.outputs_object['default_video_output'] = ""
-        self.outputs_object['default_dmx_input'] = ""
-        self.outputs_object['default_dmx_output'] = ""
-        self.outputs_object.nodes = []
 
         # Audio
         temp_node_dict = {'node' : {'uuid': self.my_node.uuid, 'mac' : self.my_node.mac}}
